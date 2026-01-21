@@ -19,7 +19,7 @@ const App: React.FC = () => {
   const [isDevMenuOpen, setIsDevMenuOpen] = useState(false);
   const [isInfoCardOpen, setIsInfoCardOpen] = useState(false);
   const [isEngineering, setIsEngineering] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false); // Defaulting to closed
   const [suggestions, setSuggestions] = useState<{ category: string; text: string }[]>([]);
   const [showProWarning, setShowProWarning] = useState(false);
   
@@ -371,7 +371,7 @@ const App: React.FC = () => {
         </div>
 
         {/* INPUT BAR */}
-        <div className="p-4 md:pb-12 flex justify-center w-full">
+        <div className="px-4 pb-12 md:pb-16 flex justify-center w-full">
           <div className="w-full max-w-3xl">
             <div className="prompt-container">
                 <div className="gemini-input-pill flex flex-col p-2 px-4 shadow-2xl">
