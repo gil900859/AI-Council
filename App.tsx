@@ -19,7 +19,7 @@ const App: React.FC = () => {
   const [isDevMenuOpen, setIsDevMenuOpen] = useState(false);
   const [isInfoCardOpen, setIsInfoCardOpen] = useState(false);
   const [isEngineering, setIsEngineering] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false); // Defaulting to closed
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false); // Sidebar defaults to closed
   const [suggestions, setSuggestions] = useState<{ category: string; text: string }[]>([]);
   const [showProWarning, setShowProWarning] = useState(false);
   
@@ -274,7 +274,9 @@ const App: React.FC = () => {
                    {suggestions.length > 0 ? suggestions.map((s, idx) => (
                       <div 
                         key={idx}
-                        onClick={() => setTopicInput(s.text)} 
+                        onClick={() => {
+                          setTopicInput(s.text);
+                        }} 
                         className="bg-[#0a0a0a] hover:bg-[#111] border border-[#222] p-4 rounded-xl text-left cursor-pointer transition-colors text-sm"
                       >
                          <p className="text-[#e3e3e3] mb-1">{s.text}</p>
@@ -370,8 +372,8 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* INPUT BAR */}
-        <div className="px-4 pb-12 md:pb-16 flex justify-center w-full">
+        {/* INPUT BAR - INCREASED BOTTOM PADDING TO PREVENT CROPPING ON MOBILE */}
+        <div className="px-4 pb-32 md:pb-36 flex justify-center w-full z-20">
           <div className="w-full max-w-3xl">
             <div className="prompt-container">
                 <div className="gemini-input-pill flex flex-col p-2 px-4 shadow-2xl">
@@ -417,7 +419,7 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {/* READ MORE INFO CARD */}
+      {/* MODALS RENDERED BELOW */}
       {isInfoCardOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
           <div className="bg-[#111] border border-[#333] p-8 rounded-[32px] max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
@@ -444,7 +446,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* SETTINGS MODAL */}
       {isSettingsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center settings-overlay p-4">
           <div className="bg-[#0a0a0a] w-full max-w-2xl max-h-[85vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col border border-[#222] animate-in zoom-in-95 duration-200">
