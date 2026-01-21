@@ -1,16 +1,15 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { AIInstance, DialogueEntry, GroundingChunk } from "../types";
 import { SYSTEM_PROMPT_TEMPLATE, SYNTHESIS_PROMPT } from "../constants";
 
 export async function promptEngineerTopic(rawTopic: string): Promise<string> {
-  const ai = new GoogleGenAI({ apiKey: AIzaSyBJxLv2ChMNEsNGMVTC0J-DcvskLOC3LVw });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const prompt = `
-    You are a world-class Prompt Engineer. 
-    The user provided a raw problem/topic: "${rawTopic}"
+    You are a professional Prompt Engineer for an AI Governance Council.
+    The user provided a raw objective: "${rawTopic}"
     
-    Your task is to rewrite this topic into a highly structured, objective, and analytically clear deliberation target for an AI council. 
-    Make it precise, identify key constraints, and set a clear objective.
+    Your task is to rewrite this objective into a highly structured, objective, and analytically clear deliberation target for the Council. 
+    Make it precise, identify key constraints, and set a clear objective for multi-agent reasoning.
     Keep the output concise (max 3 sentences).
     Output ONLY the engineered prompt text.
   `;
@@ -33,21 +32,20 @@ export async function getAIResponse(
   history: DialogueEntry[],
   totalInstances: number
 ): Promise<{ text: string; grounding?: GroundingChunk[] }> {
-  const ai = new GoogleGenAI({ apiKey: AIzaSyBJxLv2ChMNEsNGMVTC0J-DcvskLOC3LVw });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const historyText = history.length > 0 
     ? history.map(h => `${h.authorName}: ${h.content}`).join('\n')
-    : "The discussion is just beginning. Provide an opening thesis.";
+    : "The deliberation session is just beginning. Provide an opening thesis for the objective.";
 
   const prompt = `
-    Topic: ${topic}
-    History:
+    Strategic Objective: ${topic}
+    Council History:
     ${historyText}
     
-    Instruction: Provide your contribution as ${instance.name}. If you think consensus is reached, add [TERMINATE_DELIBERATION].
+    Instruction: Provide your analytical contribution as ${instance.name}. If you believe a logical consensus has been reached, add [TERMINATE_DELIBERATION].
   `;
 
-  // Explicitly enable Google Search tool for all council models as requested
   const config: any = {
     systemInstruction: SYSTEM_PROMPT_TEMPLATE(instance.name, totalInstances),
     temperature: 0.8,
@@ -63,43 +61,51 @@ export async function getAIResponse(
 
     const text = response.text || "Error: Null response.";
     const grounding = response.candidates?.[0]?.groundingMetadata?.groundingChunks as GroundingChunk[];
-
+    
     return { text, grounding };
-  } catch (error) {
-    console.error(`Error ${instance.name}:`, error);
-    return { text: `[CONNECTION ERROR]` };
+  } catch (error: any) {
+    console.error(`Error with node ${instance.name}:`, error);
+    if (instance.model !== 'gemini-flash-lite-latest') {
+        try {
+            const fallbackResponse = await ai.models.generateContent({
+                model: 'gemini-flash-lite-latest',
+                contents: prompt,
+                config: { ...config, tools: [] }
+            });
+            return { text: fallbackResponse.text || "Fallback error." };
+        } catch (e) {
+            return { text: "Critical system failure on this node." };
+        }
+    }
+    return { text: "Node offline." };
   }
 }
 
-export async function getFinalSynthesis(topic: string, history: DialogueEntry[], model: string): Promise<string> {
+export async function getFinalSynthesis(topic: string, history: DialogueEntry[], modelId: string): Promise<string> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const historyText = history.map(h => `${h.authorName}: ${h.content}`).join('\n');
+  const historyText = history.map(h => `${h.authorName}: ${h.content}`).join('\n\n');
+  const prompt = SYNTHESIS_PROMPT(topic, historyText);
 
   try {
     const response = await ai.models.generateContent({
-      model: model,
-      contents: SYNTHESIS_PROMPT(topic, historyText),
-      config: {
-        temperature: 0.3,
-        tools: [{ googleSearch: {} }], // Allow synthesis node to double check facts if needed
-      },
+      model: modelId,
+      contents: prompt,
+      config: { temperature: 0.2 }
     });
-
     return response.text || "Synthesis failed.";
   } catch (error) {
     console.error("Synthesis error:", error);
-    return "Error generating final synthesis.";
+    return "The Council has reached a stalemate. Synthesis engine unavailable.";
   }
 }
 
 export async function getSuggestions(): Promise<{ category: string; text: string }[]> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const prompt = `Generate 2 diverse, complex, and interesting problem statements for an AI council to deliberate on. 
-  One should be scientific/technical, one should be socio-economic or philosophical.
-  Each suggestion must have:
-  - 'category': a short 1-2 word label (e.g., 'Logistics', 'Philosophy', 'Science').
-  - 'text': a 1-sentence complex problem statement.
-  Return ONLY a valid JSON array of these 2 objects.`;
+  const prompt = `
+    Generate 4 unique, professional "Strategic Objectives" for an AI Research Council. 
+    Categories should be: Global Logistics, Renewable Energy, Economic Stability, or Scientific Ethics.
+    Output as JSON array of objects with "category" and "text" fields.
+  `;
 
   try {
     const response = await ai.models.generateContent({
@@ -107,17 +113,13 @@ export async function getSuggestions(): Promise<{ category: string; text: string
       contents: prompt,
       config: { responseMimeType: "application/json" }
     });
-    
-    const parsed = JSON.parse(response.text || "[]");
-    return parsed.length > 0 ? parsed : [
-      { category: "Logistics", text: "Optimize a global renewable energy grid strategy." },
-      { category: "Science", text: "Determine the most efficient path to Mars colonization." }
-    ];
+    return JSON.parse(response.text || "[]");
   } catch (error) {
-    console.error("Error fetching suggestions:", error);
     return [
-      { category: "Logistics", text: "Optimize a global renewable energy grid strategy." },
-      { category: "Science", text: "Determine the most efficient path to Mars colonization." }
+      { category: "Logistics", text: "Design an automated global supply chain for medical essentials." },
+      { category: "Energy", text: "Evaluate the feasibility of a thorium-based modular nuclear grid." },
+      { category: "Economy", text: "Develop a post-inflationary model for digital decentralized currencies." },
+      { category: "Ethics", text: "Establish universal protocols for neural-interface privacy rights." }
     ];
   }
 }
