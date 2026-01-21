@@ -4,6 +4,8 @@ import { AIInstance, DialogueEntry, GroundingChunk } from "../types";
 import { SYSTEM_PROMPT_TEMPLATE, SYNTHESIS_PROMPT } from "../constants";
 
 export async function promptEngineerTopic(rawTopic: string): Promise<string> {
+  if (!process.env.API_KEY) return rawTopic;
+
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const prompt = `
     You are a professional Prompt Engineer for an AI Governance Council.
@@ -33,6 +35,8 @@ export async function getAIResponse(
   history: DialogueEntry[],
   totalInstances: number
 ): Promise<{ text: string; grounding?: GroundingChunk[] }> {
+  if (!process.env.API_KEY) return { text: "Error: API key missing." };
+
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const historyText = history.length > 0 
@@ -66,6 +70,7 @@ export async function getAIResponse(
     return { text, grounding };
   } catch (error: any) {
     console.error(`Error with node ${instance.name}:`, error);
+    // Fallback to Flash Lite if specific model fails
     if (instance.model !== 'gemini-flash-lite-latest') {
         try {
             const fallbackResponse = await ai.models.generateContent({
@@ -73,16 +78,18 @@ export async function getAIResponse(
                 contents: prompt,
                 config: { ...config, tools: [] }
             });
-            return { text: fallbackResponse.text || "Fallback error." };
+            return { text: (fallbackResponse.text || "Fallback error.") + " (Node Fallback Active)" };
         } catch (e) {
-            return { text: "Critical system failure on this node." };
+            return { text: "Critical failure on node: " + instance.name };
         }
     }
-    return { text: "Node offline." };
+    return { text: "Node communication lost." };
   }
 }
 
 export async function getFinalSynthesis(topic: string, history: DialogueEntry[], modelId: string): Promise<string> {
+  if (!process.env.API_KEY) return "API Key missing.";
+
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const historyText = history.map(h => `${h.authorName}: ${h.content}`).join('\n\n');
   const prompt = SYNTHESIS_PROMPT(topic, historyText);
@@ -93,19 +100,28 @@ export async function getFinalSynthesis(topic: string, history: DialogueEntry[],
       contents: prompt,
       config: { temperature: 0.2 }
     });
-    return response.text || "Synthesis failed.";
+    return response.text || "Synthesis engine returned empty result.";
   } catch (error) {
     console.error("Synthesis error:", error);
-    return "The Council has reached a stalemate. Synthesis engine unavailable.";
+    return "The Council synthesis phase failed due to engine connectivity issues.";
   }
 }
 
 export async function getSuggestions(): Promise<{ category: string; text: string }[]> {
+  const fallbacks = [
+    { category: "Logistics", text: "Design an automated global supply chain for medical essentials." },
+    { category: "Energy", text: "Evaluate the feasibility of a thorium-based modular nuclear grid." },
+    { category: "Economy", text: "Develop a post-inflationary model for digital decentralized currencies." },
+    { category: "Ethics", text: "Establish universal protocols for neural-interface privacy rights." }
+  ];
+
+  if (!process.env.API_KEY) return fallbacks;
+
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const prompt = `
     Generate 4 unique, professional "Strategic Objectives" for an AI Research Council. 
-    Categories should be: Global Logistics, Renewable Energy, Economic Stability, or Scientific Ethics.
-    Output as JSON array of objects with "category" and "text" fields.
+    Categories must be: Global Logistics, Renewable Energy, Economic Stability, or Scientific Ethics.
+    Return ONLY a JSON array of objects with "category" and "text" fields.
   `;
 
   try {
@@ -114,13 +130,9 @@ export async function getSuggestions(): Promise<{ category: string; text: string
       contents: prompt,
       config: { responseMimeType: "application/json" }
     });
-    return JSON.parse(response.text || "[]");
+    const parsed = JSON.parse(response.text || "[]");
+    return parsed.length > 0 ? parsed : fallbacks;
   } catch (error) {
-    return [
-      { category: "Logistics", text: "Design an automated global supply chain for medical essentials." },
-      { category: "Energy", text: "Evaluate the feasibility of a thorium-based modular nuclear grid." },
-      { category: "Economy", text: "Develop a post-inflationary model for digital decentralized currencies." },
-      { category: "Ethics", text: "Establish universal protocols for neural-interface privacy rights." }
-    ];
+    return fallbacks;
   }
 }
