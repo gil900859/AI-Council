@@ -27,11 +27,17 @@ const App: React.FC = () => {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const isRunningRef = useRef(false);
+  const statusRef = useRef<DeliberationStatus>('idle');
   const currentHistoryRef = useRef<DialogueEntry[]>([]);
   const turnCountRef = useRef(0);
   const optimizedTopicRef = useRef('');
 
   const activeInstances = instances.slice(0, instanceCount);
+
+  // Sync statusRef with status state for the deliberation loop
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   useEffect(() => {
     const initApp = async () => {
@@ -79,14 +85,16 @@ const App: React.FC = () => {
   };
 
   const runExperiment = async () => {
-    if (isRunningRef.current || !topicInput.trim()) return;
+    if (isRunningRef.current) return;
     
-    // Developer Shortcut - Preserved as requested
+    // Developer Shortcut
     if (topicInput.trim().toLowerCase() === "5090 giveaway") {
         setTopicInput('');
         setIsDevMenuOpen(true);
         return; 
     }
+
+    if (!topicInput.trim()) return;
 
     isRunningRef.current = true;
     setVerdict(null);
@@ -111,16 +119,55 @@ const App: React.FC = () => {
     loop();
   };
 
+  const pauseDeliberation = () => {
+    setStatus('paused');
+    isRunningRef.current = false;
+  };
+
+  const resumeDeliberation = () => {
+    if (isRunningRef.current) return;
+    setStatus('running');
+    isRunningRef.current = true;
+    loop();
+  };
+
+  const injectText = () => {
+    if (!topicInput.trim()) return;
+    const newEntry: DialogueEntry = {
+      authorId: 'human',
+      authorName: 'Operator',
+      content: topicInput,
+      timestamp: Date.now(),
+      isHuman: true,
+    };
+    currentHistoryRef.current = [...currentHistoryRef.current, newEntry];
+    setHistory([...currentHistoryRef.current]);
+    setTopicInput('');
+  };
+
   const loop = async () => {
     const MAX_TURNS = Math.max(instanceCount * 2, 20); 
 
     try {
       while (turnCountRef.current < MAX_TURNS) {
+        // Check for pause signal at start of turn
+        if (statusRef.current === 'paused') {
+          isRunningRef.current = false;
+          return;
+        }
+
         const instance = activeInstances[turnCountRef.current % instanceCount];
         setActiveInstanceId(instance.id);
         
         const { text, grounding } = await getAIResponse(instance, optimizedTopicRef.current, currentHistoryRef.current, instanceCount);
         
+        // Check again after async call in case it was paused during generation
+        if (statusRef.current === 'paused') {
+            isRunningRef.current = false;
+            setActiveInstanceId(null);
+            return;
+        }
+
         const terminateSignal = "[TERMINATE_DELIBERATION]";
         const cleanResponse = text.replace(terminateSignal, "").trim();
         
@@ -152,7 +199,6 @@ const App: React.FC = () => {
     setStatus('running');
     setActiveInstanceId('SYNT');
     try {
-      // getFinalSynthesis now automatically pings prioritized models
       const { text, modelId } = await getFinalSynthesis(optimizedTopicRef.current, currentHistoryRef.current);
       setVerdict(text);
       setVerdictModel(modelId);
@@ -176,6 +222,22 @@ const App: React.FC = () => {
     setTopic('');
     setActiveInstanceId(null);
     isRunningRef.current = false;
+  };
+
+  const handleActionClick = () => {
+    if (status === 'running') {
+      pauseDeliberation();
+    } else if (status === 'paused') {
+      if (topicInput.trim()) {
+        injectText();
+      } else {
+        resumeDeliberation();
+      }
+    } else if (status === 'idle') {
+      runExperiment();
+    } else if (status === 'concluded') {
+      resetExperiment();
+    }
   };
 
   return (
@@ -225,6 +287,7 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-4">
+             {status === 'paused' && <span className="text-[10px] bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded uppercase font-bold tracking-widest animate-pulse">Deliberation Paused</span>}
              <div className="w-8 h-8 rounded-full bg-[#333] flex items-center justify-center text-xs font-bold text-white">OP</div>
           </div>
         </header>
@@ -274,18 +337,24 @@ const App: React.FC = () => {
             )}
 
             {history.map((entry, idx) => {
-              const instance = instances.find(i => i.id === entry.authorId);
+              const instance = entry.isHuman ? null : instances.find(i => i.id === entry.authorId);
               return (
                 <div key={idx} className="flex gap-4 md:gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
                   <div className="w-8 h-8 flex items-center justify-center flex-shrink-0">
-                    <i className="fas fa-sparkles sparkle-icon"></i>
+                    {entry.isHuman ? (
+                        <div className="user-avatar scale-75">U</div>
+                    ) : (
+                        <i className="fas fa-sparkles sparkle-icon"></i>
+                    )}
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2.5">
-                       <span className={`text-sm font-medium ${instance?.color || 'text-[#e3e3e3]'}`}>{entry.authorName}</span>
-                       <span className="model-chip">{GEMINI_MODELS.find(m => m.id === instance?.model)?.name || "Agent"}</span>
+                       <span className={`text-sm font-medium ${instance?.color || 'text-[#4285f4]'}`}>{entry.authorName}</span>
+                       {!entry.isHuman && (
+                           <span className="model-chip">{GEMINI_MODELS.find(m => m.id === instance?.model)?.name || "Agent"}</span>
+                       )}
                     </div>
-                    <div className="text-[#e3e3e3] leading-relaxed whitespace-pre-wrap text-[15px]">
+                    <div className={`text-[#e3e3e3] leading-relaxed whitespace-pre-wrap text-[15px] ${entry.isHuman ? 'italic opacity-90' : ''}`}>
                       {entry.content}
                     </div>
                     {entry.grounding && entry.grounding.length > 0 && (
@@ -343,7 +412,7 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* INPUT BAR - INCREASED PADDING TO PREVENT CROPPING */}
+        {/* INPUT BAR */}
         <div className="px-4 pb-36 md:pb-16 flex justify-center w-full z-20">
           <div className="w-full max-w-3xl">
             <div className="prompt-container">
@@ -355,10 +424,14 @@ const App: React.FC = () => {
                     onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
-                        runExperiment();
+                        if (status === 'paused') {
+                            injectText();
+                        } else {
+                            handleActionClick();
+                        }
                     }
                     }}
-                    placeholder="Enter objective protocol..."
+                    placeholder={status === 'paused' ? "Inject analytical prompt into history..." : "Enter objective protocol..."}
                     className="w-full bg-transparent border-none outline-none py-3 px-2 text-[#e3e3e3] placeholder-[#666] resize-none overflow-hidden max-h-60"
                     style={{ height: 'auto' }}
                     onInput={(e) => {
@@ -373,18 +446,28 @@ const App: React.FC = () => {
                         <button className="p-2.5 hover:bg-[#1a1a1a] rounded-full transition-colors text-[#666]"><i className="fas fa-microphone"></i></button>
                         <button onClick={() => setIsSettingsOpen(true)} className="p-2.5 hover:bg-[#1a1a1a] rounded-full transition-colors text-[#666]"><i className="fas fa-sliders-h"></i></button>
                     </div>
+                    
                     <button 
-                    onClick={runExperiment}
-                    disabled={isRunningRef.current || !topicInput.trim()}
-                    className={`w-10 h-10 flex items-center justify-center rounded-full transition-all ${isRunningRef.current || !topicInput.trim() ? 'text-[#333]' : 'text-[#4285f4] hover:bg-[#1a1a1a]'}`}
+                        onClick={handleActionClick}
+                        className={`w-10 h-10 flex items-center justify-center rounded-full transition-all ${
+                            status === 'running' ? 'text-red-500 hover:bg-red-500/10' : 
+                            status === 'paused' ? 'text-green-500 hover:bg-green-500/10' :
+                            (topicInput.trim() ? 'text-[#4285f4] hover:bg-[#1a1a1a]' : 'text-[#333]')
+                        }`}
                     >
-                    <i className={`fas ${isRunningRef.current ? 'fa-spinner fa-spin' : 'fa-paper-plane'}`}></i>
+                        {status === 'running' ? (
+                            <i className="fas fa-pause text-sm"></i>
+                        ) : status === 'paused' ? (
+                            <i className="fas fa-play text-sm"></i>
+                        ) : (
+                            <i className="fas fa-paper-plane"></i>
+                        )}
                     </button>
                 </div>
                 </div>
             </div>
             <p className="text-[10px] text-[#666] text-center mt-4 font-medium tracking-tight uppercase">
-              Consensus Protocol Active
+              {status === 'paused' ? "Deliberation Suspended • Injection Enabled" : "Consensus Protocol Active"}
             </p>
           </div>
         </div>
@@ -421,7 +504,7 @@ const App: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="block text-sm text-[#e3e3e3]">Manual Overide: Synthesis Engine</label>
+                    <label className="block text-sm text-[#e3e3e3]">Manual Override: Synthesis Engine</label>
                     <p className="text-[10px] text-[#666] mb-2">Note: Synthesis automatically selects the best available engine at runtime.</p>
                     <select 
                       value={synthesisModel}
