@@ -1,12 +1,10 @@
 
 import { GoogleGenAI } from "@google/genai";
 import { AIInstance, DialogueEntry, GroundingChunk } from "../types";
-import { SYSTEM_PROMPT_TEMPLATE, SYNTHESIS_PROMPT } from "../constants";
+import { SYSTEM_PROMPT_TEMPLATE, SYNTHESIS_PROMPT, SYNTHESIS_PRIORITY_LIST } from "../constants";
 
 export async function promptEngineerTopic(rawTopic: string): Promise<string> {
-  if (!process.env.API_KEY) return rawTopic;
-
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
   const prompt = `
     You are a professional Prompt Engineer for an AI Governance Council.
     The user provided a raw objective: "${rawTopic}"
@@ -35,9 +33,7 @@ export async function getAIResponse(
   history: DialogueEntry[],
   totalInstances: number
 ): Promise<{ text: string; grounding?: GroundingChunk[] }> {
-  if (!process.env.API_KEY) return { text: "Error: API key missing." };
-
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
   
   const historyText = history.length > 0 
     ? history.map(h => `${h.authorName}: ${h.content}`).join('\n')
@@ -64,62 +60,68 @@ export async function getAIResponse(
       config,
     });
 
-    const text = response.text || "Error: Null response.";
+    const text = response.text || "No analytical response generated.";
     const grounding = response.candidates?.[0]?.groundingMetadata?.groundingChunks as GroundingChunk[];
     
     return { text, grounding };
   } catch (error: any) {
-    console.error(`Error with node ${instance.name}:`, error);
-    // Fallback to Flash Lite if specific model fails
+    console.warn(`Node ${instance.name} error:`, error.message);
+    // Fallback logic
     if (instance.model !== 'gemini-flash-lite-latest') {
         try {
-            const fallbackResponse = await ai.models.generateContent({
+            const fallbackAi = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+            const fallbackResponse = await fallbackAi.models.generateContent({
                 model: 'gemini-flash-lite-latest',
                 contents: prompt,
                 config: { ...config, tools: [] }
             });
-            return { text: (fallbackResponse.text || "Fallback error.") + " (Node Fallback Active)" };
+            return { text: (fallbackResponse.text || "Node fallback failed.") + " (Fallback Node Protocol)" };
         } catch (e) {
-            return { text: "Critical failure on node: " + instance.name };
+            return { text: "Protocol failure on node: " + instance.name };
         }
     }
-    return { text: "Node communication lost." };
+    return { text: "Error: Communication link severed for node " + instance.name };
   }
 }
 
-export async function getFinalSynthesis(topic: string, history: DialogueEntry[], modelId: string): Promise<string> {
-  if (!process.env.API_KEY) return "API Key missing.";
-
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+export async function getFinalSynthesis(topic: string, history: DialogueEntry[]): Promise<{ text: string; modelId: string }> {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
   const historyText = history.map(h => `${h.authorName}: ${h.content}`).join('\n\n');
   const prompt = SYNTHESIS_PROMPT(topic, historyText);
 
-  try {
-    const response = await ai.models.generateContent({
-      model: modelId,
-      contents: prompt,
-      config: { temperature: 0.2 }
-    });
-    return response.text || "Synthesis engine returned empty result.";
-  } catch (error) {
-    console.error("Synthesis error:", error);
-    return "The Council synthesis phase failed due to engine connectivity issues.";
+  // Attempt each model in the priority list until one succeeds
+  for (const modelId of SYNTHESIS_PRIORITY_LIST) {
+    try {
+      console.log(`Synthesis Attempt: Testing ${modelId}...`);
+      const response = await ai.models.generateContent({
+        model: modelId,
+        contents: prompt,
+        config: { temperature: 0.2 }
+      });
+      
+      if (response && response.text) {
+        return { text: response.text, modelId };
+      }
+    } catch (error) {
+      console.warn(`Synthesis Attempt: Model ${modelId} failed. Trying next...`, error);
+      continue;
+    }
   }
+
+  throw new Error("All available synthesis models failed to respond.");
 }
 
 export async function getSuggestions(): Promise<{ category: string; text: string }[]> {
   const fallbacks = [
-    { category: "Logistics", text: "Design an automated global supply chain for medical essentials." },
-    { category: "Energy", text: "Evaluate the feasibility of a thorium-based modular nuclear grid." },
-    { category: "Economy", text: "Develop a post-inflationary model for digital decentralized currencies." },
-    { category: "Ethics", text: "Establish universal protocols for neural-interface privacy rights." }
+    { category: "Logistics", text: "Optimize global supply chain distribution for clean water accessibility." },
+    { category: "Energy", text: "Evaluate scalability of modular fusion reactor clusters for urban power." },
+    { category: "Economy", text: "Predict impact of hyper-automation on universal basic resource distribution." },
+    { category: "Ethics", text: "Formulate universal standards for synthetic consciousness autonomy." }
   ];
 
-  if (!process.env.API_KEY) return fallbacks;
-
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
   const prompt = `
-    Generate 4 unique, professional "Strategic Objectives" for an AI Research Council. 
+    Generate 4 unique, professional "Strategic Objectives" for an AI Governance Council. 
     Categories must be: Global Logistics, Renewable Energy, Economic Stability, or Scientific Ethics.
     Return ONLY a JSON array of objects with "category" and "text" fields.
   `;

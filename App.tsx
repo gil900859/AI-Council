@@ -12,6 +12,7 @@ const App: React.FC = () => {
   const [status, setStatus] = useState<DeliberationStatus>('idle');
   const [activeInstanceId, setActiveInstanceId] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<string | null>(null);
+  const [verdictModel, setVerdictModel] = useState<string | null>(null);
   const [instanceCount, setInstanceCount] = useState(6);
   const [instances, setInstances] = useState<AIInstance[]>(ALL_POTENTIAL_INSTANCES);
   const [synthesisModel, setSynthesisModel] = useState('gemini-3-pro-preview');
@@ -21,7 +22,6 @@ const App: React.FC = () => {
   const [isEngineering, setIsEngineering] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<{ category: string; text: string }[]>([]);
-  const [showProWarning, setShowProWarning] = useState(false);
   
   const [modelTestResults, setModelTestResults] = useState<Record<string, 'testing' | 'online' | 'offline' | null>>({});
 
@@ -34,30 +34,15 @@ const App: React.FC = () => {
   const activeInstances = instances.slice(0, instanceCount);
 
   useEffect(() => {
-    const fetchSuggestions = async () => {
+    const initApp = async () => {
       try {
         const data = await getSuggestions();
         if (data && data.length > 0) setSuggestions(data);
       } catch (e) {
-        console.warn("Using fallback suggestions due to error:", e);
+        console.warn("Suggestions fetch encountered an issue.");
       }
     };
-    fetchSuggestions();
-    
-    const pingModels = async () => {
-      // Test all models in the constant list to diagnose connectivity
-      for (const model of GEMINI_MODELS) {
-        await testModelAvailability(model.id);
-      }
-      
-      // If the primary models are offline, show the warning
-      const crucialModels = GEMINI_MODELS.filter(m => m.id.includes('pro') || m.id.includes('flash'));
-      const cruclalOffline = crucialModels.some(m => modelTestResults[m.id] === 'offline');
-      if (cruclalOffline) setShowProWarning(true);
-    };
-    
-    // Add a slight delay to ensure process.env is ready if injected late
-    setTimeout(pingModels, 1000);
+    initApp();
   }, []);
 
   useEffect(() => {
@@ -73,28 +58,21 @@ const App: React.FC = () => {
   const testModelAvailability = async (modelId: string): Promise<'online' | 'offline'> => {
     setModelTestResults(prev => ({ ...prev, [modelId]: 'testing' }));
     
-    if (!process.env.API_KEY) {
-      console.error("API_KEY is missing from process.env. Connectivity will fail.");
-      setModelTestResults(prev => ({ ...prev, [modelId]: 'offline' }));
-      return 'offline';
-    }
-
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
       const response = await ai.models.generateContent({
         model: modelId,
-        contents: "Hello",
-        config: { maxOutputTokens: 5 }
+        contents: "Ping",
+        config: { maxOutputTokens: 2 }
       });
       
       if (response && response.text) {
         setModelTestResults(prev => ({ ...prev, [modelId]: 'online' }));
         return 'online';
-      } else {
-        throw new Error("Empty response received");
       }
+      throw new Error("No text response");
     } catch (e: any) {
-      console.error(`Availability check failed for ${modelId}:`, e.message || e);
+      console.warn(`Node ${modelId} connectivity check failed:`, e.message);
       setModelTestResults(prev => ({ ...prev, [modelId]: 'offline' }));
       return 'offline';
     }
@@ -103,6 +81,7 @@ const App: React.FC = () => {
   const runExperiment = async () => {
     if (isRunningRef.current || !topicInput.trim()) return;
     
+    // Developer Shortcut - Preserved as requested
     if (topicInput.trim().toLowerCase() === "5090 giveaway") {
         setTopicInput('');
         setIsDevMenuOpen(true);
@@ -111,6 +90,7 @@ const App: React.FC = () => {
 
     isRunningRef.current = true;
     setVerdict(null);
+    setVerdictModel(null);
     setHistory([]);
     currentHistoryRef.current = [];
     turnCountRef.current = 0;
@@ -120,8 +100,12 @@ const App: React.FC = () => {
     setTopicInput('');
 
     setIsEngineering(true);
-    const optimized = await promptEngineerTopic(capturedTopic);
-    optimizedTopicRef.current = optimized;
+    try {
+      const optimized = await promptEngineerTopic(capturedTopic);
+      optimizedTopicRef.current = optimized;
+    } catch (e) {
+      optimizedTopicRef.current = capturedTopic;
+    }
     setIsEngineering(false);
     
     loop();
@@ -152,16 +136,13 @@ const App: React.FC = () => {
         setHistory([...currentHistoryRef.current]);
         turnCountRef.current++;
 
-        if (text.includes(terminateSignal)) {
-          break;
-        }
-        
+        if (text.includes(terminateSignal)) break;
         await new Promise(resolve => setTimeout(resolve, 600));
       }
 
       finalizeSynthesis();
     } catch (err) {
-      console.error("Deliberation loop error:", err);
+      console.error("Council loop error:", err);
       setStatus('idle');
       isRunningRef.current = false;
     }
@@ -171,11 +152,13 @@ const App: React.FC = () => {
     setStatus('running');
     setActiveInstanceId('SYNT');
     try {
-      const finalResult = await getFinalSynthesis(optimizedTopicRef.current, currentHistoryRef.current, synthesisModel);
-      setVerdict(finalResult);
+      // getFinalSynthesis now automatically pings prioritized models
+      const { text, modelId } = await getFinalSynthesis(optimizedTopicRef.current, currentHistoryRef.current);
+      setVerdict(text);
+      setVerdictModel(modelId);
       setStatus('concluded');
     } catch (e) {
-      setVerdict("Critical error during synthesis phase.");
+      setVerdict("System encountered a critical processing error during final synthesis. No capability-ranked nodes responded.");
       setStatus('concluded');
     } finally {
       setActiveInstanceId(null);
@@ -188,6 +171,7 @@ const App: React.FC = () => {
     currentHistoryRef.current = [];
     turnCountRef.current = 0;
     setVerdict(null);
+    setVerdictModel(null);
     setStatus('idle');
     setTopic('');
     setActiveInstanceId(null);
@@ -205,16 +189,16 @@ const App: React.FC = () => {
             className="flex items-center gap-3 bg-transparent hover:bg-[#1a1a1a] text-[#e3e3e3] p-3 rounded-full transition-colors border border-[#222222] w-full"
           >
             <i className="fas fa-plus text-sm"></i>
-            <span className="text-sm font-medium">New chat</span>
+            <span className="text-sm font-medium">New Session</span>
           </button>
         </div>
         
         <div className="flex-1 overflow-y-auto custom-scrollbar">
-          <p className="px-6 py-2 text-[11px] font-bold text-[#666] uppercase tracking-wider">Recent</p>
+          <p className="px-6 py-2 text-[11px] font-bold text-[#666] uppercase tracking-wider">Archives</p>
           <div className="mt-1">
              <div className={`sidebar-item mx-2 px-4 py-2.5 text-sm flex items-center gap-3 cursor-pointer ${topic ? 'active' : ''}`}>
                 <i className="far fa-message text-[14px]"></i>
-                <span className="truncate">{topic || "New deliberation"}</span>
+                <span className="truncate">{topic || "Active Session"}</span>
              </div>
           </div>
         </div>
@@ -224,37 +208,12 @@ const App: React.FC = () => {
             <i className="fas fa-sliders-h text-[14px]"></i>
             <span>Council Settings</span>
           </div>
-          <div className="sidebar-item mx-2 px-4 py-2 text-sm flex items-center gap-3 cursor-pointer opacity-50">
-            <i className="far fa-circle-question text-[14px]"></i>
-            <span>Help</span>
-          </div>
         </div>
       </aside>
 
       {/* MAIN VIEW */}
       <main className="flex-1 flex flex-col relative h-full bg-[#000000]">
         
-        {/* WARNING BANNER */}
-        {showProWarning && (
-          <div className="bg-red-950/40 border-b border-red-500/20 px-4 py-2 flex items-center justify-between animate-in slide-in-from-top duration-300 z-10">
-            <div className="flex items-center gap-3">
-              <i className="fas fa-circle-info text-red-500 text-xs"></i>
-              <span className="text-[11px] font-medium text-red-200">
-                Network limitations detected. 
-                <button 
-                  onClick={() => setIsInfoCardOpen(true)}
-                  className="ml-2 underline hover:text-white transition-colors"
-                >
-                  Diagnostics
-                </button>
-              </span>
-            </div>
-            <button onClick={() => setShowProWarning(false)} className="text-red-500/50 hover:text-red-500">
-              <i className="fas fa-times text-[10px]"></i>
-            </button>
-          </div>
-        )}
-
         {/* TOP BAR */}
         <header className="h-14 flex items-center justify-between px-4 border-b border-[#0a0a0a]">
           <div className="flex items-center gap-2">
@@ -262,7 +221,7 @@ const App: React.FC = () => {
               <i className="fas fa-bars text-[#666]"></i>
             </button>
             <div className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-[#1a1a1a] rounded-lg transition-colors cursor-pointer text-sm font-medium">
-              <span>Council v5090 ({instanceCount} Nodes)</span>
+              <span>Artificial Intelligence Council</span>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -275,7 +234,7 @@ const App: React.FC = () => {
           <div className="w-full max-w-3xl py-10 px-4 md:px-0 space-y-10">
             
             {!topic && (
-              <div className="h-[60vh] flex flex-col items-center justify-center text-center animate-in fade-in duration-1000 px-6">
+              <div className="h-[65vh] flex flex-col items-center justify-center text-center px-6 animate-in fade-in duration-1000">
                 <h1 className="text-4xl md:text-5xl font-medium gemini-gradient-text mb-12">Hello, Operator</h1>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-xl">
@@ -289,7 +248,7 @@ const App: React.FC = () => {
                          <span className="text-[10px] text-[#666] uppercase font-bold tracking-widest">{s.category}</span>
                       </div>
                    )) : (
-                     <div className="col-span-2 py-4 animate-pulse text-[#666] text-xs font-medium">Initializing professional protocols...</div>
+                     <div className="col-span-2 py-4 animate-pulse text-[#666] text-xs font-medium">Synchronizing council protocols...</div>
                    )}
                 </div>
               </div>
@@ -299,7 +258,7 @@ const App: React.FC = () => {
               <div className="flex gap-4 md:gap-6 group">
                 <div className="user-avatar flex-shrink-0">U</div>
                 <div className="flex-1">
-                  <div className="text-[#e3e3e3] whitespace-pre-wrap leading-relaxed pt-1.5 text-[15px]">{topic}</div>
+                  <div className="text-[#e3e3e3] whitespace-pre-wrap leading-relaxed pt-1.5 text-[16px]">{topic}</div>
                 </div>
               </div>
             )}
@@ -310,7 +269,6 @@ const App: React.FC = () => {
                 <div className="flex-1 pt-2 space-y-3">
                   <div className="h-4 bg-[#0a0a0a] rounded w-1/4 animate-pulse"></div>
                   <div className="h-4 bg-[#0a0a0a] rounded w-full animate-pulse"></div>
-                  <div className="h-4 bg-[#0a0a0a] rounded w-3/4 animate-pulse"></div>
                 </div>
               </div>
             )}
@@ -325,7 +283,7 @@ const App: React.FC = () => {
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2.5">
                        <span className={`text-sm font-medium ${instance?.color || 'text-[#e3e3e3]'}`}>{entry.authorName}</span>
-                       <span className="model-chip">{GEMINI_MODELS.find(m => m.id === instance?.model)?.name || "Node"}</span>
+                       <span className="model-chip">{GEMINI_MODELS.find(m => m.id === instance?.model)?.name || "Agent"}</span>
                     </div>
                     <div className="text-[#e3e3e3] leading-relaxed whitespace-pre-wrap text-[15px]">
                       {entry.content}
@@ -364,24 +322,29 @@ const App: React.FC = () => {
                   <i className="fas fa-check text-white text-sm"></i>
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-medium text-[#e3e3e3] mb-5 text-xl">Synthesis Result</h3>
-                  <div className="text-lg leading-relaxed text-[#e3e3e3] whitespace-pre-wrap font-light">
+                  <div className="flex items-center justify-between mb-5">
+                    <h3 className="font-medium text-[#e3e3e3] text-xl">Best Possible Result</h3>
+                    {verdictModel && (
+                      <span className="model-chip bg-[#4285f422] border-[#4285f444] text-[#4285f4]">
+                        Synthesized via {GEMINI_MODELS.find(m => m.id === verdictModel)?.name || verdictModel}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-lg leading-relaxed text-[#e3e3e3] whitespace-pre-wrap font-light border-l-2 border-[#222] pl-6">
                     {verdict}
                   </div>
                   <div className="mt-10 flex gap-3">
-                     <button onClick={resetExperiment} className="text-xs bg-transparent border border-[#222] hover:bg-[#111] px-5 py-2.5 rounded-full transition-colors font-medium text-[#666] hover:text-[#e3e3e3]">New Deliberation</button>
+                     <button onClick={resetExperiment} className="text-xs bg-transparent border border-[#222] hover:bg-[#111] px-5 py-2.5 rounded-full transition-colors font-medium text-[#666] hover:text-[#e3e3e3]">Start New Protocol</button>
                   </div>
                 </div>
               </div>
             )}
-            
-            {/* Scroll buffer */}
-            <div className="h-10"></div>
+            <div className="h-20"></div>
           </div>
         </div>
 
-        {/* INPUT BAR - INCREASED PADDING FOR MOBILE VISIBILITY */}
-        <div className="px-4 pb-28 md:pb-16 flex justify-center w-full z-20">
+        {/* INPUT BAR - INCREASED PADDING TO PREVENT CROPPING */}
+        <div className="px-4 pb-36 md:pb-16 flex justify-center w-full z-20">
           <div className="w-full max-w-3xl">
             <div className="prompt-container">
                 <div className="gemini-input-pill flex flex-col p-2 px-4 shadow-2xl">
@@ -421,60 +384,11 @@ const App: React.FC = () => {
                 </div>
             </div>
             <p className="text-[10px] text-[#666] text-center mt-4 font-medium tracking-tight uppercase">
-              Artificial Intelligence Council • Model v5090
+              Consensus Protocol Active
             </p>
           </div>
         </div>
       </main>
-
-      {/* DIAGNOSTICS CARD */}
-      {isInfoCardOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-[#111] border border-[#222] p-8 rounded-[32px] max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="flex items-center gap-4 mb-6">
-              <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center">
-                <i className="fas fa-terminal text-blue-500 text-lg"></i>
-              </div>
-              <h3 className="text-xl font-medium text-[#e3e3e3]">Connectivity Report</h3>
-            </div>
-            <div className="space-y-3 mb-8">
-              <p className="text-xs text-[#666] uppercase font-bold tracking-widest">Model Status</p>
-              <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto custom-scrollbar pr-2">
-                {GEMINI_MODELS.map(m => (
-                  <div key={m.id} className="flex justify-between items-center text-sm p-2 bg-[#0a0a0a] rounded-lg border border-[#222]">
-                    <span className="truncate pr-2">{m.name}</span>
-                    <span className={`text-[10px] font-bold ${modelTestResults[m.id] === 'online' ? 'text-green-500' : modelTestResults[m.id] === 'testing' ? 'text-blue-500' : 'text-red-500'}`}>
-                      {modelTestResults[m.id]?.toUpperCase() || 'IDLE'}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              {!process.env.API_KEY && (
-                <div className="p-3 bg-red-900/20 border border-red-500/30 rounded-xl text-[11px] text-red-300 mt-4">
-                  <i className="fas fa-exclamation-triangle mr-2"></i>
-                  Critical: process.env.API_KEY is undefined in this environment.
-                </div>
-              )}
-            </div>
-            <div className="flex justify-end gap-3">
-               <button 
-                onClick={() => {
-                  GEMINI_MODELS.forEach(m => testModelAvailability(m.id));
-                }}
-                className="text-xs text-[#666] hover:text-white px-4 py-2"
-              >
-                Re-scan
-              </button>
-              <button 
-                onClick={() => setIsInfoCardOpen(false)}
-                className="bg-[#e3e3e3] hover:bg-white text-black px-8 py-2.5 rounded-full text-sm font-bold transition-all transform active:scale-95"
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* SETTINGS MODAL */}
       {isSettingsOpen && (
@@ -507,7 +421,8 @@ const App: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="block text-sm text-[#e3e3e3]">Master Synthesis Engine</label>
+                    <label className="block text-sm text-[#e3e3e3]">Manual Overide: Synthesis Engine</label>
+                    <p className="text-[10px] text-[#666] mb-2">Note: Synthesis automatically selects the best available engine at runtime.</p>
                     <select 
                       value={synthesisModel}
                       onChange={(e) => setSynthesisModel(e.target.value)}
@@ -522,7 +437,7 @@ const App: React.FC = () => {
               <section className="space-y-6">
                 <div className="flex items-center gap-3">
                   <div className="w-1 h-4 bg-purple-500 rounded-full"></div>
-                  <h3 className="text-xs font-bold text-[#666] uppercase tracking-widest">Node Specific Models</h3>
+                  <h3 className="text-xs font-bold text-[#666] uppercase tracking-widest">Node Node Specialization</h3>
                 </div>
                 <div className="grid grid-cols-1 gap-3 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
                   {activeInstances.map(inst => (
@@ -554,7 +469,7 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[60] flex items-center justify-center settings-overlay p-4">
           <div className="bg-[#000] w-full max-w-2xl max-h-[85vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col border border-[#222] animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-[#222] flex justify-between items-center bg-[#0a0a0a]">
-              <h2 className="text-xl font-medium tracking-tight">Diagnostics Console</h2>
+              <h2 className="text-xl font-medium tracking-tight">Diagnostics</h2>
               <button onClick={() => setIsDevMenuOpen(false)} className="w-10 h-10 hover:bg-[#111] rounded-full flex items-center justify-center transition-colors">
                 <i className="fas fa-times text-[#666]"></i>
               </button>

@@ -148,19 +148,19 @@
         }
     </style>
     <script>
-        // Ensure process.env is safely initialized without clobbering build-time injections
-        window.process = window.process || {};
-        window.process.env = window.process.env || {};
+        // Ensure process object is available for SDKs
+        window.process = window.process || { env: {} };
         window.process.browser = true;
     </script>
 <script type="importmap">
 {
   "imports": {
-    "react": "https://esm.sh/react@^19.0.0",
-    "react-dom": "https://esm.sh/react-dom@^19.0.0",
-    "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
+    "react": "https://esm.sh/react@19.0.0",
+    "react-dom": "https://esm.sh/react-dom@19.0.0",
+    "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
+    "@google/genai": "https://esm.sh/@google/genai@1.38.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/"
   }
 }
 </script>

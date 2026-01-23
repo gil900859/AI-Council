@@ -1,5 +1,5 @@
 {
-  "name": "Project 5090: AI Council",
+  "name": "AI Council Deliberation",
   "description": "6 raw instances of Gemini Flash Lite interacting in a deliberation loop to solve complex problems.",
   "requestFramePermissions": []
 }

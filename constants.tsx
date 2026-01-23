@@ -2,12 +2,21 @@
 import { AIInstance } from './types';
 
 export const GEMINI_MODELS = [
-  { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' },
   { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro' },
   { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+  { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' },
   { id: 'gemini-flash-latest', name: 'Gemini 2.5 Flash' },
-  { id: 'gemini-flash-lite-latest', name: 'Gemini Flash Lite' },
   { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
+  { id: 'gemini-flash-lite-latest', name: 'Gemini Flash Lite' },
+];
+
+export const SYNTHESIS_PRIORITY_LIST = [
+  'gemini-3-pro-preview',
+  'gemini-2.5-pro',
+  'gemini-3-flash-preview',
+  'gemini-flash-latest',
+  'gemini-2.0-flash',
+  'gemini-flash-lite-latest'
 ];
 
 const COLORS = [
